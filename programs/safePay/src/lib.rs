@@ -44,6 +44,8 @@ fn transfer_escrow_out<'info>(
     ];
     let outer = vec![inner.as_slice()];
 
+    msg!("Destination wallet {}", destination_wallet.is_writable);
+
     // Perform the actual transfer
     let transfer_instruction = Transfer{
         from: escrow_wallet.to_account_info(),
@@ -140,9 +142,22 @@ pub mod safe_pay {
             ctx.accounts.token_program.to_account_info(),
             ctx.accounts.refund_wallet.to_account_info(),
             wallet_amount,
-        )?;
+        )
+    }
 
-        Ok(())
+    pub fn complete_grant(ctx: Context<CompleteGrant>) -> Result<()> {
+        let wallet_amount = ctx.accounts.escrow_wallet_state.amount;
+        transfer_escrow_out(
+            ctx.accounts.user_sending.to_account_info(),
+            ctx.accounts.user_receiving.to_account_info(),
+            ctx.accounts.mint_of_token_being_sent.to_account_info(),
+            &mut ctx.accounts.escrow_wallet_state,
+            ctx.accounts.application_state.to_account_info(),
+            ctx.accounts.application_state.application_state_bump,
+            ctx.accounts.token_program.to_account_info(),
+            ctx.accounts.wallet_to_deposit_to.to_account_info(),
+            wallet_amount
+        )
     }
 }
 
@@ -170,7 +185,7 @@ pub struct Initiate<'info> {
     // Users and accounts in the system
     #[account(mut)]
     user_sending: Signer<'info>,  // Alice
-    /// CHECK: weird 
+    /// CHECK: unsafe 
     user_receiving: AccountInfo<'info>,              // Bob
     mint_of_token_being_sent: Account<'info, Mint>,  // USDC
 
@@ -208,7 +223,7 @@ pub struct PullBackInstruction<'info> {
     // Users and accounts in the system
     #[account(mut)]
     user_sending: Signer<'info>,
-    /// CHECK: another weird
+    /// CHECK: unsafe
     user_receiving: AccountInfo<'info>,
     mint_of_token_being_sent: Account<'info, Mint>,
 
@@ -224,6 +239,45 @@ pub struct PullBackInstruction<'info> {
         constraint=refund_wallet.mint == mint_of_token_being_sent.key()
     )]
     refund_wallet: Account<'info, TokenAccount>,
+}
+
+#[derive(Accounts)]
+pub struct CompleteGrant<'info> {
+    #[account(
+        mut,
+        seeds=[b"safe_pay_noah_state".as_ref(), user_sending.key().as_ref(), user_receiving.key.as_ref(), mint_of_token_being_sent.key().as_ref()],
+        bump = application_state.application_state_bump,
+        has_one = user_sending,
+        has_one = user_receiving,
+        has_one = mint_of_token_being_sent,
+    )]
+    application_state: Account<'info, State>,
+    #[account(
+        mut,
+        seeds=[b"safe_pay_noah_wallet".as_ref(), user_sending.key().as_ref(), user_receiving.key.as_ref(), mint_of_token_being_sent.key().as_ref()],
+        bump = application_state.escrow_wallet_state_bump,
+    )]
+    escrow_wallet_state: Account<'info, TokenAccount>,
+
+    #[account(
+        mut,
+        associated_token::mint = mint_of_token_being_sent,
+        associated_token::authority = user_receiving,
+    )]
+    wallet_to_deposit_to: Account<'info, TokenAccount>,   // Bob's USDC wallet
+
+    // Users and accounts in the system
+    /// CHECK: unsafe
+    #[account(mut)]
+    user_sending: AccountInfo<'info>,                     // Alice
+    #[account(mut)]
+    user_receiving: Signer<'info>,                        // Bob
+    mint_of_token_being_sent: Account<'info, Mint>,       // USDC
+
+    // Application level accounts
+    system_program: Program<'info, System>,
+    token_program: Program<'info, Token>,
+    rent: Sysvar<'info, Rent>,
 }
 
 #[account]

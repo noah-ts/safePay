@@ -1,6 +1,6 @@
 import * as anchor from "@project-serum/anchor";
 import { Program } from "@project-serum/anchor";
-import { createMint, getOrCreateAssociatedTokenAccount, TOKEN_PROGRAM_ID, AccountLayout, mintTo } from '@solana/spl-token';
+import { createMint, getOrCreateAssociatedTokenAccount, TOKEN_PROGRAM_ID, AccountLayout, mintTo, ASSOCIATED_TOKEN_PROGRAM_ID } from '@solana/spl-token';
 import { SafePay } from "../target/types/safe_pay";
 
 interface PDAParameters {
@@ -104,7 +104,7 @@ describe("safePay", () => {
       pda = await getPdaParams(provider.connection, alice.publicKey, bob.publicKey, mintAddress);
   });
 
-  it("safe pay program", async () => {
+  it("initiate and pull back from escrow", async () => {
     const aliceBefore = await provider.connection.getTokenAccountsByOwner(alice.publicKey, { programId: TOKEN_PROGRAM_ID })
     console.log("Alice's wallet before initiating");
     aliceBefore.value.forEach((tokenAccount) => {
@@ -117,12 +117,13 @@ describe("safePay", () => {
       const tx = await program.methods
       .initiate(new anchor.BN(20000000), pda.stateBump, pda.escrowBump)
       .accounts({
+        walletToWithdrawFrom: aliceWallet,
+
         applicationState: pda.stateKey,
         escrowWalletState: pda.escrowWalletKey,
         userSending: alice.publicKey,
         userReceiving: bob.publicKey,
         mintOfTokenBeingSent: mintAddress,
-        walletToWithdrawFrom: aliceWallet,
 
         systemProgram: anchor.web3.SystemProgram.programId,
         rent: anchor.web3.SYSVAR_RENT_PUBKEY,
@@ -155,12 +156,13 @@ describe("safePay", () => {
       const tx = await program.methods
       .pullBack()
       .accounts({
+        refundWallet: aliceWallet,
+
         applicationState: pda.stateKey,
         escrowWalletState: pda.escrowWalletKey,
         userSending: alice.publicKey,
         userReceiving: bob.publicKey,
         mintOfTokenBeingSent: mintAddress,
-        refundWallet: aliceWallet,
 
         systemProgram: anchor.web3.SystemProgram.programId,
         rent: anchor.web3.SYSVAR_RENT_PUBKEY,
@@ -188,4 +190,106 @@ describe("safePay", () => {
       console.log(`${new anchor.web3.PublicKey(accountData.mint)}   ${accountData.amount}`);
     })
   });
+
+  it('initiate and complete escrow', async () => {
+    const aliceBefore = await provider.connection.getTokenAccountsByOwner(alice.publicKey, { programId: TOKEN_PROGRAM_ID })
+    console.log("Alice's wallet before initiating");
+    aliceBefore.value.forEach((tokenAccount) => {
+      const accountData = AccountLayout.decode(tokenAccount.account.data);
+      console.log(`${new anchor.web3.PublicKey(accountData.mint)}   ${accountData.amount}`);
+    })
+
+    const bobBefore = await provider.connection.getTokenAccountsByOwner(bob.publicKey, { programId: TOKEN_PROGRAM_ID })
+    console.log("Bob's wallet before initiating");
+    bobBefore.value.forEach((tokenAccount) => {
+      const accountData = AccountLayout.decode(tokenAccount.account.data);
+      console.log(`${new anchor.web3.PublicKey(accountData.mint)}   ${accountData.amount}`);
+    })
+
+    console.log('Initiate escrow (transfer tokens from Alice to escrow wallet)')
+    try {
+      const tx = await program.methods
+      .initiate(new anchor.BN(20000000), pda.stateBump, pda.escrowBump)
+      .accounts({
+        walletToWithdrawFrom: aliceWallet,
+
+        applicationState: pda.stateKey,
+        escrowWalletState: pda.escrowWalletKey,
+        userSending: alice.publicKey,
+        userReceiving: bob.publicKey,
+        mintOfTokenBeingSent: mintAddress,
+
+        systemProgram: anchor.web3.SystemProgram.programId,
+        rent: anchor.web3.SYSVAR_RENT_PUBKEY,
+        tokenProgram: TOKEN_PROGRAM_ID,
+      })
+      .signers([alice])
+      .rpc()
+
+      console.log("Your transaction signature", tx);
+    } catch (error) {
+      console.error('Error initiating safe pay: ', error)
+    }
+
+    const stateTokenAccounts = await provider.connection.getTokenAccountsByOwner(pda.stateKey, { programId: TOKEN_PROGRAM_ID })
+    console.log("Escrow wallet after initiating");
+    stateTokenAccounts.value.forEach((tokenAccount) => {
+      const accountData = AccountLayout.decode(tokenAccount.account.data);
+      console.log(`${new anchor.web3.PublicKey(accountData.mint)}   ${accountData.amount}`);
+    })
+
+    const aliceAfter = await provider.connection.getTokenAccountsByOwner(alice.publicKey, { programId: TOKEN_PROGRAM_ID })
+    console.log("Alice's wallet after initiating");
+    aliceAfter.value.forEach((tokenAccount) => {
+      const accountData = AccountLayout.decode(tokenAccount.account.data);
+      console.log(`${new anchor.web3.PublicKey(accountData.mint)}   ${accountData.amount}`);
+    })
+
+    console.log('Complete grant (transfer tokens from escrow wallet to Bob)')
+
+    try {
+      const tx = await program.methods
+      .completeGrant()
+      .accounts({
+        walletToDepositTo: bobWallet,
+
+        applicationState: pda.stateKey,
+        escrowWalletState: pda.escrowWalletKey,
+        userSending: alice.publicKey,
+        userReceiving: bob.publicKey,
+        mintOfTokenBeingSent: mintAddress,
+
+        systemProgram: anchor.web3.SystemProgram.programId,
+        rent: anchor.web3.SYSVAR_RENT_PUBKEY,
+        tokenProgram: TOKEN_PROGRAM_ID
+      })
+      .signers([bob])
+      .rpc()
+
+      console.log("Your transaction signature", tx);
+    } catch (error) {
+      console.error('Error completing grant: ', error)
+    }
+
+    const stateTokenAccountsTwo = await provider.connection.getTokenAccountsByOwner(pda.stateKey, { programId: TOKEN_PROGRAM_ID })
+    console.log("Escrow wallet after completing escrow");
+    stateTokenAccountsTwo.value.forEach((tokenAccount) => {
+      const accountData = AccountLayout.decode(tokenAccount.account.data);
+      console.log(`${new anchor.web3.PublicKey(accountData.mint)}   ${accountData.amount}`);
+    })
+
+    const aliceAfterTwo = await provider.connection.getTokenAccountsByOwner(alice.publicKey, { programId: TOKEN_PROGRAM_ID })
+    console.log("Alice's wallet after completing escrow");
+    aliceAfterTwo.value.forEach((tokenAccount) => {
+      const accountData = AccountLayout.decode(tokenAccount.account.data);
+      console.log(`${new anchor.web3.PublicKey(accountData.mint)}   ${accountData.amount}`);
+    })
+
+    const bobAfter = await provider.connection.getTokenAccountsByOwner(bob.publicKey, { programId: TOKEN_PROGRAM_ID })
+    console.log("Bob's wallet after completing escrow");
+    bobAfter.value.forEach((tokenAccount) => {
+      const accountData = AccountLayout.decode(tokenAccount.account.data);
+      console.log(`${new anchor.web3.PublicKey(accountData.mint)}   ${accountData.amount}`);
+    })
+  })
 });
