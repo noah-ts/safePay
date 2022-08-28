@@ -93,12 +93,15 @@ describe("safePay", () => {
       } catch (error) {
         console.error('Error minting tokens: ', error)
       }
-
       return [user, userAssociatedTokenAccount.address];
   }
 
   beforeEach(async () => {
-      mintAddress = await customCreateMint(provider.connection);
+      try {
+        mintAddress = await customCreateMint(provider.connection);
+      } catch (error) {
+        console.error('Error creating custom mint: ', error)
+      }
       [alice, aliceWallet] = await createUserAndAssociatedWallet(provider.connection, mintAddress);
       [bob, bobWallet] = await createUserAndAssociatedWallet(provider.connection, mintAddress);
       pda = await getPdaParams(provider.connection, alice.publicKey, bob.publicKey, mintAddress);
@@ -291,5 +294,9 @@ describe("safePay", () => {
       const accountData = AccountLayout.decode(tokenAccount.account.data);
       console.log(`${new anchor.web3.PublicKey(accountData.mint)}   ${accountData.amount}`);
     })
+
+    console.log('Fetching state')
+    const state = await program.account.state.fetch(pda.stateKey)
+    console.log(state)
   })
 });
