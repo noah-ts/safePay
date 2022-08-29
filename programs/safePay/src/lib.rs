@@ -28,23 +28,24 @@ fn transfer_escrow_out<'info>(
     state_bump: u8,
     token_program: AccountInfo<'info>,
     destination_wallet: AccountInfo<'info>,
-    amount: u64
+    amount: u64,
+    id: u64
 ) -> Result<()> {
 
     // Nothing interesting here! just boilerplate to compute our signer seeds for
     // signing on behalf of our PDA.
     let bump_vector = state_bump.to_le_bytes();
     let mint_of_token_being_sent_pk = mint_of_token_being_sent.key().clone();
+    let id = id.to_le_bytes();
     let inner = vec![
         b"safe_pay_noah_state".as_ref(),
         user_sending.key.as_ref(),
         user_receiving.key.as_ref(),
         mint_of_token_being_sent_pk.as_ref(), 
+        id.as_ref(),
         bump_vector.as_ref(),
     ];
     let outer = vec![inner.as_slice()];
-
-    msg!("Destination wallet {}", destination_wallet.is_writable);
 
     // Perform the actual transfer
     let transfer_instruction = Transfer{
@@ -58,7 +59,6 @@ fn transfer_escrow_out<'info>(
         outer.as_slice(),
     );
     anchor_spl::token::transfer(cpi_ctx, amount)?;
-
 
     // Use the `reload()` function on an account to reload it's state. Since we performed the
     // transfer, we are expecting the `amount` field to have changed.
@@ -89,9 +89,10 @@ fn transfer_escrow_out<'info>(
 pub mod safe_pay {
     use super::*;
 
-    pub fn initiate(ctx: Context<Initiate>, amount: u64, application_state_bump: u8, escrow_wallet_state_bump: u8) -> Result<()> {
+    pub fn initiate(ctx: Context<Initiate>, amount: u64, application_state_bump: u8, escrow_wallet_state_bump: u8, id: u64) -> Result<()> {
         // Set the state attributes
         let state = &mut ctx.accounts.application_state;
+        state.id = id;
         state.user_sending = ctx.accounts.user_sending.key().clone();
         state.user_receiving = ctx.accounts.user_receiving.key().clone();
         state.mint_of_token_being_sent = ctx.accounts.mint_of_token_being_sent.key().clone();
@@ -104,11 +105,13 @@ pub mod safe_pay {
         // signing on behalf of our PDA.
         let bump_vector = &[state.application_state_bump][..];
         let mint_of_token_being_sent_pk = ctx.accounts.mint_of_token_being_sent.key().clone();
+        let id = id.to_le_bytes();
         let inner = vec![
             b"safe_pay_noah_state".as_ref(),
             ctx.accounts.user_sending.key.as_ref(),
             ctx.accounts.user_receiving.key.as_ref(),
             mint_of_token_being_sent_pk.as_ref(), 
+            id.as_ref(),
             bump_vector.as_ref(),
         ];
         let outer = vec![inner.as_slice()];
@@ -130,7 +133,7 @@ pub mod safe_pay {
         Ok(())
     }
 
-    pub fn pull_back(ctx: Context<PullBackInstruction>) -> Result<()> {
+    pub fn pull_back(ctx: Context<PullBackInstruction>, id: u64) -> Result<()> {
         let wallet_amount = ctx.accounts.escrow_wallet_state.amount;
         transfer_escrow_out(
             ctx.accounts.user_sending.to_account_info(),
@@ -142,10 +145,11 @@ pub mod safe_pay {
             ctx.accounts.token_program.to_account_info(),
             ctx.accounts.refund_wallet.to_account_info(),
             wallet_amount,
+            id
         )
     }
 
-    pub fn complete_grant(ctx: Context<CompleteGrant>) -> Result<()> {
+    pub fn complete_grant(ctx: Context<CompleteGrant>, id: u64) -> Result<()> {
         let wallet_amount = ctx.accounts.escrow_wallet_state.amount;
         transfer_escrow_out(
             ctx.accounts.user_sending.to_account_info(),
@@ -156,26 +160,28 @@ pub mod safe_pay {
             ctx.accounts.application_state.application_state_bump,
             ctx.accounts.token_program.to_account_info(),
             ctx.accounts.wallet_to_deposit_to.to_account_info(),
-            wallet_amount
+            wallet_amount,
+            id
         )
     }
 }
 
 #[derive(Accounts)]
+#[instruction(amount: u64, application_state_bump: u8, escrow_wallet_state_bump: u8, id: u64)]
 pub struct Initiate<'info> {
     // Derived PDAs
     #[account(
         init,
         space = 1000,
         payer = user_sending,
-        seeds=[b"safe_pay_noah_state".as_ref(), user_sending.key().as_ref(), user_receiving.key.as_ref(), mint_of_token_being_sent.key().as_ref()],
+        seeds=[b"safe_pay_noah_state".as_ref(), user_sending.key().as_ref(), user_receiving.key.as_ref(), mint_of_token_being_sent.key().as_ref(), id.to_le_bytes().as_ref()],
         bump,
     )]
     application_state: Account<'info, State>,
     #[account(
         init,
         payer = user_sending,
-        seeds=[b"safe_pay_noah_wallet".as_ref(), user_sending.key().as_ref(), user_receiving.key.as_ref(), mint_of_token_being_sent.key().as_ref()],
+        seeds=[b"safe_pay_noah_wallet".as_ref(), user_sending.key().as_ref(), user_receiving.key.as_ref(), mint_of_token_being_sent.key().as_ref(), id.to_le_bytes().as_ref()],
         bump,
         token::mint=mint_of_token_being_sent,
         token::authority=application_state,
@@ -185,7 +191,7 @@ pub struct Initiate<'info> {
     // Users and accounts in the system
     #[account(mut)]
     user_sending: Signer<'info>,  // Alice
-    /// CHECK: unsafe 
+    /// CHECK: not reading or writing to this account 
     user_receiving: AccountInfo<'info>,              // Bob
     mint_of_token_being_sent: Account<'info, Mint>,  // USDC
 
@@ -204,10 +210,11 @@ pub struct Initiate<'info> {
 }
 
 #[derive(Accounts)]
+#[instruction(id: u64)]
 pub struct PullBackInstruction<'info> {
     #[account(
         mut,
-        seeds=[b"safe_pay_noah_state".as_ref(), user_sending.key().as_ref(), user_receiving.key.as_ref(), mint_of_token_being_sent.key().as_ref()],
+        seeds=[b"safe_pay_noah_state".as_ref(), user_sending.key().as_ref(), user_receiving.key.as_ref(), mint_of_token_being_sent.key().as_ref(), id.to_le_bytes().as_ref()],
         bump = application_state.application_state_bump,
         has_one = user_sending,
         has_one = user_receiving,
@@ -216,14 +223,14 @@ pub struct PullBackInstruction<'info> {
     application_state: Account<'info, State>,
     #[account(
         mut,
-        seeds=[b"safe_pay_noah_wallet".as_ref(), user_sending.key().as_ref(), user_receiving.key.as_ref(), mint_of_token_being_sent.key().as_ref()],
+        seeds=[b"safe_pay_noah_wallet".as_ref(), user_sending.key().as_ref(), user_receiving.key.as_ref(), mint_of_token_being_sent.key().as_ref(), id.to_le_bytes().as_ref()],
         bump = application_state.escrow_wallet_state_bump,
     )]
     escrow_wallet_state: Account<'info, TokenAccount>,    
     // Users and accounts in the system
     #[account(mut)]
     user_sending: Signer<'info>,
-    /// CHECK: unsafe
+    /// CHECK: not reading or writing to this account
     user_receiving: AccountInfo<'info>,
     mint_of_token_being_sent: Account<'info, Mint>,
 
@@ -242,10 +249,11 @@ pub struct PullBackInstruction<'info> {
 }
 
 #[derive(Accounts)]
+#[instruction(id: u64)]
 pub struct CompleteGrant<'info> {
     #[account(
         mut,
-        seeds=[b"safe_pay_noah_state".as_ref(), user_sending.key().as_ref(), user_receiving.key.as_ref(), mint_of_token_being_sent.key().as_ref()],
+        seeds=[b"safe_pay_noah_state".as_ref(), user_sending.key().as_ref(), user_receiving.key.as_ref(), mint_of_token_being_sent.key().as_ref(), id.to_le_bytes().as_ref()],
         bump = application_state.application_state_bump,
         has_one = user_sending,
         has_one = user_receiving,
@@ -254,7 +262,7 @@ pub struct CompleteGrant<'info> {
     application_state: Account<'info, State>,
     #[account(
         mut,
-        seeds=[b"safe_pay_noah_wallet".as_ref(), user_sending.key().as_ref(), user_receiving.key.as_ref(), mint_of_token_being_sent.key().as_ref()],
+        seeds=[b"safe_pay_noah_wallet".as_ref(), user_sending.key().as_ref(), user_receiving.key.as_ref(), mint_of_token_being_sent.key().as_ref(), id.to_le_bytes().as_ref()],
         bump = application_state.escrow_wallet_state_bump,
     )]
     escrow_wallet_state: Account<'info, TokenAccount>,
@@ -267,7 +275,7 @@ pub struct CompleteGrant<'info> {
     wallet_to_deposit_to: Account<'info, TokenAccount>,   // Bob's USDC wallet
 
     // Users and accounts in the system
-    /// CHECK: unsafe
+    /// CHECK: not reading or writing to this account
     #[account(mut)]
     user_sending: AccountInfo<'info>,                     // Alice
     #[account(mut)]
@@ -282,6 +290,9 @@ pub struct CompleteGrant<'info> {
 
 #[account]
 pub struct State {
+    // id
+    id: u64,
+
     // Alice
     user_sending: Pubkey,
 

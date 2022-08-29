@@ -4,6 +4,7 @@ import { createMint, getOrCreateAssociatedTokenAccount, TOKEN_PROGRAM_ID, Accoun
 import { SafePay } from "../target/types/safe_pay";
 
 interface PDAParameters {
+  id: anchor.BN,
   escrowWalletKey: anchor.web3.PublicKey,
   stateKey: anchor.web3.PublicKey,
   escrowBump: number,
@@ -27,13 +28,17 @@ describe("safePay", () => {
   const keypair = anchor.web3.Keypair.generate()
 
   const getPdaParams = async (connection: anchor.web3.Connection, alice: anchor.web3.PublicKey, bob: anchor.web3.PublicKey, mint: anchor.web3.PublicKey): Promise<PDAParameters> => {
-    let [statePubKey, stateBump] = await anchor.web3.PublicKey.findProgramAddress(
-        [anchor.utils.bytes.utf8.encode("safe_pay_noah_state"), alice.toBuffer(), bob.toBuffer(), mint.toBuffer()], program.programId,
+    const id = new anchor.BN(parseInt((Date.now() / 1000).toString()))
+    const idBuffer = id.toBuffer('le', 8)
+
+    const [statePubKey, stateBump] = await anchor.web3.PublicKey.findProgramAddress(
+        [anchor.utils.bytes.utf8.encode("safe_pay_noah_state"), alice.toBuffer(), bob.toBuffer(), mint.toBuffer(), idBuffer], program.programId,
     );
-    let [walletPubKey, walletBump] = await anchor.web3.PublicKey.findProgramAddress(
-        [anchor.utils.bytes.utf8.encode("safe_pay_noah_wallet"), alice.toBuffer(), bob.toBuffer(), mint.toBuffer()], program.programId,
+    const [walletPubKey, walletBump] = await anchor.web3.PublicKey.findProgramAddress(
+        [anchor.utils.bytes.utf8.encode("safe_pay_noah_wallet"), alice.toBuffer(), bob.toBuffer(), mint.toBuffer(), idBuffer], program.programId,
     );
     return {
+        id,
         escrowBump: walletBump,
         escrowWalletKey: walletPubKey,
         stateBump,
@@ -97,6 +102,7 @@ describe("safePay", () => {
   }
 
   beforeEach(async () => {
+      await provider.connection.requestAirdrop(provider.wallet.publicKey, 3 * anchor.web3.LAMPORTS_PER_SOL)
       try {
         mintAddress = await customCreateMint(provider.connection);
       } catch (error) {
@@ -118,7 +124,7 @@ describe("safePay", () => {
     console.log('Initiate escrow (transfer tokens from Alice to escrow wallet)')
     try {
       const tx = await program.methods
-      .initiate(new anchor.BN(20000000), pda.stateBump, pda.escrowBump)
+      .initiate(new anchor.BN(20000000), pda.stateBump, pda.escrowBump, pda.id)
       .accounts({
         walletToWithdrawFrom: aliceWallet,
 
@@ -157,7 +163,7 @@ describe("safePay", () => {
     console.log('Pullback from escrow (transfer tokens from escrow wallet back to Alice)')
     try {
       const tx = await program.methods
-      .pullBack()
+      .pullBack(pda.id)
       .accounts({
         refundWallet: aliceWallet,
 
@@ -212,7 +218,7 @@ describe("safePay", () => {
     console.log('Initiate escrow (transfer tokens from Alice to escrow wallet)')
     try {
       const tx = await program.methods
-      .initiate(new anchor.BN(20000000), pda.stateBump, pda.escrowBump)
+      .initiate(new anchor.BN(20000000), pda.stateBump, pda.escrowBump, pda.id)
       .accounts({
         walletToWithdrawFrom: aliceWallet,
 
@@ -252,7 +258,7 @@ describe("safePay", () => {
 
     try {
       const tx = await program.methods
-      .completeGrant()
+      .completeGrant(pda.id)
       .accounts({
         walletToDepositTo: bobWallet,
 
