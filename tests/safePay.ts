@@ -47,10 +47,10 @@ describe("safePay", () => {
     txFund.add(anchor.web3.SystemProgram.transfer({
         fromPubkey: provider.wallet.publicKey,
         toPubkey: keypair.publicKey,
-        lamports: 5 * anchor.web3.LAMPORTS_PER_SOL,
+        lamports: 0.2 * anchor.web3.LAMPORTS_PER_SOL,
     }));
     const sigTxFund = await provider.send(txFund);
-    console.log(`[${keypair.publicKey.toBase58()}] Funded new account with 5 SOL: ${sigTxFund}`);
+    console.log(`[${keypair.publicKey.toBase58()}] Funded new account with 0.2 SOL: ${sigTxFund}`);
 
     return await createMint(
       connection,
@@ -69,10 +69,10 @@ describe("safePay", () => {
       txFund.add(anchor.web3.SystemProgram.transfer({
           fromPubkey: provider.wallet.publicKey,
           toPubkey: user.publicKey,
-          lamports: 5 * anchor.web3.LAMPORTS_PER_SOL,
+          lamports: 0.2 * anchor.web3.LAMPORTS_PER_SOL,
       }));
       const sigTxFund = await provider.send(txFund);
-      console.log(`[${user.publicKey.toBase58()}] Funded new account with 5 SOL: ${sigTxFund}`);
+      console.log(`[${user.publicKey.toBase58()}] Funded new account with 0.2 SOL: ${sigTxFund}`);
 
       let userAssociatedTokenAccount = await getOrCreateAssociatedTokenAccount(
         connection,
